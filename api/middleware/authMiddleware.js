@@ -1,40 +1,45 @@
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
-
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    privateKeyId: process.env.FIREBASE_PRIVATE_KEY_ID,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    clientId: process.env.FIREBASE_CLIENT_ID,
-    authUri: process.env.FIREBASE_AUTH_URI,
-    tokenUri: process.env.FIREBASE_TOKEN_URI,
-    authProviderX509CertUrl: process.env.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
-    clientX509CertUrl: process.env.FIREBASE_CLIENT_X509_CERT_URL,
-  }),
-});
+const { verifyToken } = require('../controllers/authController');
 
 exports.authMiddleware = async (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
+  const token = req.headers.authorization?.split(' ')[1] || req.cookies.accessToken;
 
   if (!token) {
-    return res.status(401).json({ message: 'Unauthorized' });
+    return res.status(401).json({ message: 'Access token not provided' });
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    // Декодируем токен без проверки для получения uid и timestamp
+    const decoded = jwt.decode(token);
+    
+    if (!decoded || !decoded.uid || !decoded.timestamp) {
+      return res.status(401).json({ message: 'Invalid token format' });
+    }
+
+    // Получение данных пользователя из Firestore
+    const db = admin.firestore();
+    const userDoc = await db.collection('users').doc(decoded.uid).get();
+    
+    if (!userDoc.exists) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    // Проверяем токен с правильным секретом
+    verifyToken(token, decoded.uid, decoded.timestamp, false);
+
+    req.user = {
+      uid: decoded.uid,
+      ...userDoc.data()
+    };
+    
     next();
   } catch (error) {
-    console.log('JWT verification failed, trying Firebase token verification:', error.message);
-    try {
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      req.user = decodedToken;
-      next();
-    } catch (firebaseError) {
-      console.error('Firebase token verification failed:', firebaseError.message);
-      res.status(401).json({ message: 'Invalid token', error: firebaseError.message });
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired', code: 'TOKEN_EXPIRED' });
     }
+    
+    console.error('Auth middleware error:', error);
+    res.status(401).json({ message: 'Invalid token', error: error.message });
   }
 };
