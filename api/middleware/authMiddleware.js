@@ -10,14 +10,12 @@ exports.authMiddleware = async (req, res, next) => {
   }
 
   try {
-    // Декодируем токен без проверки для получения uid и timestamp
     const decoded = jwt.decode(token);
     
     if (!decoded || !decoded.uid || !decoded.timestamp) {
       return res.status(401).json({ message: 'Invalid token format' });
     }
 
-    // Получение данных пользователя из Firestore
     const db = admin.firestore();
     const userDoc = await db.collection('users').doc(decoded.uid).get();
     
@@ -25,7 +23,6 @@ exports.authMiddleware = async (req, res, next) => {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    // Проверяем токен с правильным секретом
     verifyToken(token, decoded.uid, decoded.timestamp, false);
 
     req.user = {

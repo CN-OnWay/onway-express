@@ -32,7 +32,6 @@ exports.handleRates = async (req, res) => {
   }
 };
 
-// Пример защищенного маршрута
 exports.getData = async (req, res) => {
   try {
     res.status(200).json({
